@@ -9,5 +9,4 @@ A web-based simulator for page replacement algorithms (FIFO, LRU, Optimal) with 
 - Random page string generator
 - Export results to text file
 
-## How to Run
-Just open `page_replacement_simulator.html` in any browser. No installation needed.
+
