@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Replacement Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #080c0a;
+    --bg2:      #0d1410;
+    --bg3:      #111a14;
+    --panel:    #0f1a12;
+    --border:   #1a3020;
+    --green:    #00e676;
+    --green2:   #00c853;
+    --green3:   #69f0ae;
+    --dim:      #1e4028;
+    --text:     #b2dfdb;
+    --text2:    #4caf50;
+    --red:      #ff5252;
+    --yellow:   #ffd740;
+    --cyan:     #18ffff;
+    --fault:    #ff5252;
+    --hit:      #00e676;
+    --empty:    #1a2e1f;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Grid noise */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,230,118,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,230,118,0.015) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── HEADER ── */
+  header {
+    position: relative;
+    z-index: 10;
+    padding: 24px 40px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(180deg, rgba(0,230,118,0.04) 0%, transparent 100%);
+  }
+
+  .logo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .logo-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: var(--green);
+    text-shadow: 0 0 20px rgba(0,230,118,0.5);
+  }
+
+  .logo-sub {
+    font-size: 10px;
+    color: var(--text2);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+  }
+
+  .header-status {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+  }
+
+  .status-item {
+    font-size: 11px;
+    color: var(--text2);
+    letter-spacing: 1px;
+  }
+
+  .status-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2s infinite;
+    margin-right: 6px;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .app {
+    position: relative;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 73px);
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    background: var(--panel);
+  }
+
+  .panel-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--text2);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Algo selector */
+  .algo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .algo-btn {
+    padding: 12px 8px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .algo-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .algo-btn:hover { border-color: var(--green2); color: var(--green); }
+  .algo-btn.active {
+    border-color: var(--green);
+    color: var(--green);
+    background: rgba(0,230,118,0.08);
+    box-shadow: 0 0 16px rgba(0,230,118,0.15), inset 0 0 16px rgba(0,230,118,0.05);
+  }
+
+  .compare-btn {
+    grid-column: 1 / -1;
+  }
+
+  /* Input group */
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .input-label {
+    font-size: 10px;
+    color: var(--text2);
+    letter-spacing: 2px;
+  }
+
+  .input-field {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+
+  .input-field:focus { border-color: var(--green2); }
+  .input-field::placeholder { color: var(--dim); }
+
+  .range-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .range-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--green);
+    height: 3px;
+    cursor: pointer;
+  }
+
+  .range-val {
+    font-size: 18px;
+    color: var(--green);
+    width: 28px;
+    text-align: right;
+    font-family: 'Orbitron', monospace;
+  }
+
+  /* Buttons */
+  .run-btn {
+    width: 100%;
+    padding: 14px;
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: 'Orbitron', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .run-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    transform: translateX(-100%);
+    transition: transform 0.2s;
+    z-index: -1;
+  }
+
+  .run-btn:hover {
+    color: var(--bg);
+    box-shadow: 0 0 30px rgba(0,230,118,0.4);
+  }
+  .run-btn:hover::before { transform: translateX(0); }
+
+  .run-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .secondary-btn {
+    width: 100%;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .secondary-btn:hover { border-color: var(--text2); color: var(--text); }
+
+  /* Speed control */
+  .speed-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .speed-chip {
+    flex: 1;
+    padding: 7px 4px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+
+  .speed-chip.active {
+    border-color: var(--yellow);
+    color: var(--yellow);
+    background: rgba(255,215,64,0.08);
+  }
+
+  /* ── MAIN CONTENT ── */
+  .main {
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow-y: auto;
+  }
+
+  /* Stats bar */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--green);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.5s ease;
+  }
+
+  .stat-card.active::before { transform: scaleX(1); }
+
+  .stat-label {
+    font-size: 9px;
+    color: var(--text2);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--green);
+    line-height: 1;
+  }
+
+  .stat-value.fault { color: var(--fault); }
+  .stat-value.hit { color: var(--hit); }
+  .stat-value.rate { color: var(--yellow); }
+
+  /* Reference string display */
+  .ref-display {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px 20px;
+  }
+
+  .ref-scroll {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    align-items: flex-end;
+  }
+
+  .ref-scroll::-webkit-scrollbar { height: 3px; }
+  .ref-scroll::-webkit-scrollbar-track { background: var(--bg3); }
+  .ref-scroll::-webkit-scrollbar-thumb { background: var(--dim); }
+
+  .ref-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .ref-page {
+    width: 38px; height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--text);
+    transition: all 0.3s;
+    position: relative;
+  }
+
+  .ref-page.current {
+    border-color: var(--yellow);
+    color: var(--yellow);
+    box-shadow: 0 0 12px rgba(255,215,64,0.3);
+    z-index: 2;
+  }
+
+  .ref-page.done-fault {
+    border-color: rgba(255,82,82,0.4);
+    background: rgba(255,82,82,0.06);
+    color: #ff8a80;
+  }
+
+  .ref-page.done-hit {
+    border-color: rgba(0,230,118,0.3);
+    background: rgba(0,230,118,0.05);
+    color: var(--green3);
+  }
+
+  .ref-marker {
+    font-size: 11px;
+    height: 14px;
+    color: var(--fault);
+    font-weight: bold;
+  }
+
+  /* Frame matrix table */
+  .matrix-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  .matrix-header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .matrix-title {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--text2);
+    text-transform: uppercase;
+  }
+
+  .matrix-scroll {
+    overflow-x: auto;
+    padding: 20px;
+  }
+
+  .matrix-scroll::-webkit-scrollbar { height: 4px; }
+  .matrix-scroll::-webkit-scrollbar-track { background: var(--bg3); }
+  .matrix-scroll::-webkit-scrollbar-thumb { background: var(--dim); }
+
+  .matrix-table {
+    border-collapse: separate;
+    border-spacing: 4px;
+    min-width: 100%;
+  }
+
+  .matrix-table td, .matrix-table th {
+    font-size: 12px;
+    text-align: center;
+    padding: 0;
+  }
+
+  .frame-label {
+    font-size: 10px;
+    color: var(--text2);
+    letter-spacing: 1px;
+    padding-right: 12px !important;
+    white-space: nowrap;
+    text-align: right !important;
+  }
+
+  .matrix-cell {
+    width: 38px; height: 34px;
+    background: var(--empty);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 13px;
+    transition: all 0.25s;
+    position: relative;
+  }
+
+  .matrix-cell.changed {
+    background: rgba(0,230,118,0.12);
+    border-color: var(--green);
+    color: var(--green);
+    box-shadow: 0 0 8px rgba(0,230,118,0.2);
+  }
+
+  .matrix-cell.fault-cell {
+    background: rgba(255,82,82,0.1);
+    border-color: rgba(255,82,82,0.5);
+    color: #ff8a80;
+  }
+
+  .matrix-cell.hit-cell {
+    background: rgba(0,230,118,0.06);
+    border-color: rgba(0,230,118,0.25);
+    color: var(--green3);
+  }
+
+  .matrix-cell.current-col {
+    outline: 2px solid var(--yellow);
+    outline-offset: -2px;
+  }
+
+  .matrix-cell.empty-cell {
+    color: var(--dim);
+  }
+
+  .marker-row td {
+    font-size: 14px;
+    color: var(--fault);
+    font-weight: bold;
+    height: 20px;
+    padding-top: 4px !important;
+  }
+
+  .marker-row .hit-marker {
+    color: transparent;
+  }
+
+  /* Step info banner */
+  .step-banner {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-height: 56px;
+  }
+
+  .step-num {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    color: var(--text2);
+    letter-spacing: 2px;
+    white-space: nowrap;
+  }
+
+  .step-event {
+    font-size: 13px;
+    flex: 1;
+  }
+
+  .step-event .page-num { color: var(--yellow); font-weight: bold; }
+  .step-event .fault-tag { color: var(--fault); margin-left: 8px; }
+  .step-event .hit-tag { color: var(--hit); margin-left: 8px; }
+  .step-event .evict-info { color: #888; font-size: 11px; margin-left: 8px; }
+
+  /* Hit rate bar */
+  .hitbar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 180px;
+  }
+
+  .hitbar-track {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hitbar-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--green);
+    transition: width 0.4s ease;
+    box-shadow: 0 0 6px var(--green);
+  }
+
+  .hitbar-pct {
+    font-family: 'Orbitron', monospace;
+    font-size: 12px;
+    color: var(--green);
+    white-space: nowrap;
+  }
+
+  /* Eviction log */
+  .log-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  .log-body {
+    padding: 12px 20px;
+    max-height: 160px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .log-body::-webkit-scrollbar { width: 3px; }
+  .log-body::-webkit-scrollbar-thumb { background: var(--dim); }
+
+  .log-entry {
+    font-size: 11px;
+    color: var(--text2);
+    opacity: 0;
+    transform: translateX(-8px);
+    transition: all 0.3s;
+    display: flex;
+    gap: 12px;
+    line-height: 1.6;
+  }
+
+  .log-entry.visible { opacity: 1; transform: translateX(0); }
+  .log-entry .log-step { color: var(--dim); width: 60px; flex-shrink: 0; }
+  .log-entry .log-msg { color: var(--text); }
+  .log-entry .log-type-fault { color: var(--fault); margin-right: 6px; }
+  .log-entry .log-type-hit { color: var(--hit); margin-right: 6px; }
+
+  /* Compare table */
+  .compare-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .compare-table th {
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: var(--text2);
+    text-transform: uppercase;
+    padding: 12px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: normal;
+  }
+
+  .compare-table td {
+    padding: 12px 20px;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(26,48,32,0.5);
+  }
+
+  .compare-table tr:last-child td { border-bottom: none; }
+
+  .compare-table tr.best-row td {
+    color: var(--green);
+    background: rgba(0,230,118,0.05);
+  }
+
+  .compare-algo { color: var(--cyan); letter-spacing: 1px; }
+
+  .bar-cell { min-width: 160px; }
+
+  .inline-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .inline-bar-track {
+    flex: 1;
+    height: 6px;
+    background: var(--border);
+    position: relative;
+  }
+
+  .inline-bar-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--green);
+    transition: width 0.6s ease;
+  }
+
+  .inline-bar-fill.mid { background: var(--yellow); }
+  .inline-bar-fill.worst { background: var(--red); }
+
+  /* Frame sweep */
+  .sweep-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  .sweep-grid {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sweep-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+  }
+
+  .sweep-label {
+    width: 60px;
+    color: var(--text2);
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .sweep-bar-track {
+    flex: 1;
+    height: 18px;
+    background: var(--bg3);
+    position: relative;
+    border: 1px solid var(--border);
+  }
+
+  .sweep-bar-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--green2);
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    padding-left: 6px;
+    font-size: 10px;
+    color: var(--bg);
+    font-weight: bold;
+    overflow: hidden;
+  }
+
+  .sweep-bar-fill.anomaly {
+    background: var(--fault);
+    box-shadow: 0 0 12px rgba(255,82,82,0.5);
+  }
+
+  .sweep-count {
+    width: 30px;
+    text-align: right;
+    color: var(--text);
+  }
+
+  .anomaly-tag {
+    font-size: 10px;
+    color: var(--fault);
+    letter-spacing: 1px;
+    animation: blink 1s infinite;
+  }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Playback controls */
+  .controls-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .ctrl-btn {
+    flex: 1;
+    padding: 10px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .ctrl-btn:hover { border-color: var(--green2); color: var(--green); }
+  .ctrl-btn.primary { border-color: var(--green); color: var(--green); }
+  .ctrl-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--dim);
+    gap: 12px;
+    text-align: center;
+  }
+
+  .empty-icon {
+    font-family: 'Orbitron', monospace;
+    font-size: 40px;
+    color: var(--border);
+  }
+
+  .empty-text { font-size: 12px; letter-spacing: 2px; color: var(--text2); opacity: 0.4; }
+
+  /* Save button */
+  .save-btn {
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .save-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+  /* Mode tabs */
+  .mode-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mode-tab {
+    padding: 10px 20px;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text2);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+
+  .mode-tab.active {
+    color: var(--green);
+    border-bottom-color: var(--green);
+  }
+
+  /* Step progress bar */
+  .progress-bar {
+    height: 2px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--green2), var(--green3));
+    transition: width 0.3s;
+    box-shadow: 0 0 8px var(--green);
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .tag-fault { background: rgba(255,82,82,0.15); color: var(--fault); border: 1px solid rgba(255,82,82,0.3); }
+  .tag-hit   { background: rgba(0,230,118,0.1);  color: var(--hit);   border: 1px solid rgba(0,230,118,0.25); }
+
+  @keyframes cellIn {
+    from { transform: scale(0.7); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
+  .cell-animate { animation: cellIn 0.2s ease forwards; }
+
+  .section-gap { display: flex; flex-direction: column; gap: 24px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-title">MEM/SIM</div>
+    <div class="logo-sub">Page Replacement Algorithm Simulator</div>
+  </div>
+  <div class="header-status">
+    <div class="status-item"><span class="status-dot"></span>SYSTEM READY</div>
+    <div class="status-item" id="clockDisplay"></div>
+  </div>
+</header>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <div>
+      <div class="panel-label">Algorithm</div>
+      <div class="algo-grid">
+        <button class="algo-btn active" onclick="setAlgo('FIFO')">FIFO</button>
+        <button class="algo-btn" onclick="setAlgo('LRU')">LRU</button>
+        <button class="algo-btn" onclick="setAlgo('OPT')">OPTIMAL</button>
+        <button class="algo-btn compare-btn" onclick="setAlgo('COMPARE')">◈ COMPARE ALL</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-label">Configuration</div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+
+        <div class="input-group">
+          <div class="input-label">Frame Count</div>
+          <div class="range-row">
+            <input type="range" id="frameRange" min="1" max="10" value="3"
+                   oninput="document.getElementById('frameVal').textContent=this.value">
+            <div class="range-val" id="frameVal">3</div>
+          </div>
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Page Reference String</div>
+          <input class="input-field" id="pageInput" type="text"
+                 placeholder="e.g. 7 0 1 2 0 3 0 4"
+                 value="7 0 1 2 0 3 0 4 2 3 0 3">
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Random Generate</div>
+          <div style="display:flex;gap:6px">
+            <input class="input-field" id="randCount" type="number" min="4" max="50" value="12"
+                   style="width:60px;flex-shrink:0" placeholder="len">
+            <input class="input-field" id="randRange" type="number" min="2" max="20" value="8"
+                   placeholder="range 0–N">
+            <button class="secondary-btn" style="width:auto;padding:8px 12px;flex-shrink:0"
+                    onclick="generateRandom()">GEN</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div>
+      <div class="panel-label">Playback</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="speed-row">
+          <button class="speed-chip" onclick="setSpeed(800,this)">SLOW</button>
+          <button class="speed-chip active" onclick="setSpeed(400,this)">MED</button>
+          <button class="speed-chip" onclick="setSpeed(120,this)">FAST</button>
+          <button class="speed-chip" onclick="setSpeed(0,this)">STEP</button>
+        </div>
+        <div class="controls-row">
+          <button class="ctrl-btn" id="prevBtn" onclick="stepBack()" disabled>◀ PREV</button>
+          <button class="ctrl-btn primary" id="nextBtn" onclick="stepFwd()" disabled>NEXT ▶</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="run-btn" onclick="runSimulation()">▶ RUN SIMULATION</button>
+    <button class="secondary-btn" onclick="resetAll()">RESET</button>
+    <button class="save-btn" style="width:100%;text-align:center" onclick="saveResults()">↓ EXPORT RESULTS</button>
+
+    <div id="sweepSection" style="display:none">
+      <div class="panel-label">Frame Sweep (Belady's)</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="algo-btn" style="flex:1;font-size:10px" onclick="runSweep('FIFO')">FIFO</button>
+        <button class="algo-btn" style="flex:1;font-size:10px" onclick="runSweep('LRU')">LRU</button>
+        <button class="algo-btn" style="flex:1;font-size:10px" onclick="runSweep('OPT')">OPT</button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN PANEL -->
+  <main class="main" id="mainPanel">
+
+    <div class="section-gap" id="simView">
+
+      <!-- Stats -->
+      <div class="stats-bar">
+        <div class="stat-card" id="sc-steps">
+          <div class="stat-label">Total Steps</div>
+          <div class="stat-value" id="sv-steps">—</div>
+        </div>
+        <div class="stat-card" id="sc-faults">
+          <div class="stat-label">Page Faults</div>
+          <div class="stat-value fault" id="sv-faults">—</div>
+        </div>
+        <div class="stat-card" id="sc-hits">
+          <div class="stat-label">Hits</div>
+          <div class="stat-value hit" id="sv-hits">—</div>
+        </div>
+        <div class="stat-card" id="sc-rate">
+          <div class="stat-label">Hit Rate</div>
+          <div class="stat-value rate" id="sv-rate">—</div>
+        </div>
+      </div>
+
+      <!-- Step banner + progress -->
+      <div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        <div class="step-banner" id="stepBanner">
+          <div class="empty-state" style="padding:0;flex-direction:row;gap:12px;width:100%">
+            <div class="empty-text">CONFIGURE AND RUN A SIMULATION TO BEGIN</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reference string -->
+      <div class="ref-display">
+        <div class="panel-label" style="margin-bottom:10px">Page Reference String</div>
+        <div class="ref-scroll" id="refDisplay">
+          <div class="empty-text" style="padding:8px 0">—</div>
+        </div>
+      </div>
+
+      <!-- Frame matrix -->
+      <div class="matrix-panel">
+        <div class="matrix-header">
+          <div class="matrix-title">Frame State Matrix</div>
+          <div id="algoTag" style="font-size:11px;color:var(--cyan);letter-spacing:2px"></div>
+        </div>
+        <div class="matrix-scroll">
+          <div id="matrixBody">
+            <div class="empty-state"><div class="empty-icon">▦</div><div class="empty-text">MATRIX WILL APPEAR HERE</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Eviction log -->
+      <div class="log-panel">
+        <div class="matrix-header">
+          <div class="matrix-title">Eviction Log</div>
+        </div>
+        <div class="log-body" id="logBody">
+          <div class="empty-text" style="align-self:center;padding:20px 0">—</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Compare view (hidden initially) -->
+    <div id="compareView" style="display:none" class="section-gap">
+      <div class="compare-panel">
+        <div class="matrix-header">
+          <div class="matrix-title">Algorithm Comparison</div>
+        </div>
+        <table class="compare-table" id="compareTable">
+          <thead>
+            <tr>
+              <th>Algorithm</th>
+              <th>Faults</th>
+              <th>Hits</th>
+              <th>Fault Rate</th>
+              <th>Hit Rate</th>
+              <th class="bar-cell">Fault Bar</th>
+            </tr>
+          </thead>
+          <tbody id="compareTbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Per-algo matrices in compare mode -->
+      <div id="compareMatrices" class="section-gap"></div>
+    </div>
+
+    <!-- Sweep view -->
+    <div id="sweepView" style="display:none">
+      <div class="sweep-panel">
+        <div class="matrix-header">
+          <div class="matrix-title" id="sweepTitle">Frame Sweep — Belady's Anomaly Detector</div>
+        </div>
+        <div class="sweep-grid" id="sweepGrid"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────
+let state = {
+  algo: 'FIFO',
+  frames: 3,
+  pages: [],
+  speed: 400,
+  stepMode: false,
+  currentStep: -1,
+  simSteps: [],    // [{frame[], isFault, evicted, page, hits, faults}]
+  matrix: [],      // matrix[frameIdx][stepIdx]
+  miss: [],
+  running: false,
+  timer: null
+};
+
+// ─── CLOCK ───────────────────────────────────────────────
+function updateClock() {
+  const d = new Date();
+  document.getElementById('clockDisplay').textContent =
+    d.toLocaleTimeString('en-GB', {hour12:false});
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ─── ALGO SELECTOR ───────────────────────────────────────
+function setAlgo(a) {
+  state.algo = a;
+  document.querySelectorAll('.algo-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('sweepSection').style.display = (a === 'FIFO' || a === 'LRU' || a === 'OPT') ? 'block' : 'none';
+  resetAll(true);
+}
+
+function setSpeed(ms, el) {
+  state.speed = ms;
+  state.stepMode = (ms === 0);
+  document.querySelectorAll('.speed-chip').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('prevBtn').disabled = !state.stepMode;
+  document.getElementById('nextBtn').disabled = !state.stepMode;
+}
+
+// ─── PARSE INPUT ─────────────────────────────────────────
+function parsePages() {
+  return document.getElementById('pageInput').value
+    .trim().split(/[\s,]+/)
+    .map(Number)
+    .filter(n => !isNaN(n) && n >= 0);
+}
+
+function generateRandom() {
+  const len = parseInt(document.getElementById('randCount').value) || 12;
+  const range = parseInt(document.getElementById('randRange').value) || 8;
+  const arr = Array.from({length: len}, () => Math.floor(Math.random() * range));
+  document.getElementById('pageInput').value = arr.join(' ');
+}
+
+// ─── ALGORITHMS ──────────────────────────────────────────
+function runFIFO(pages, frameSize) {
+  const frame = new Array(frameSize).fill(-1);
+  const matrix = Array.from({length: frameSize}, () => []);
+  const steps = [], miss = [];
+  let index = 0, faults = 0, hits = 0;
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    let isFault = !frame.includes(page);
+    let evicted = null;
+
+    if (isFault) {
+      evicted = frame[index] !== -1 ? frame[index] : null;
+      frame[index] = page;
+      index = (index + 1) % frameSize;
+      faults++;
+      miss.push('*');
+    } else {
+      hits++;
+      miss.push(' ');
+    }
+
+    const snap = [...frame];
+    for (let f = 0; f < frameSize; f++) matrix[f].push(frame[f]);
+    steps.push({ page, isFault, evicted, snap, hits, faults });
+  }
+  return { steps, matrix, miss };
+}
+
+function runLRU(pages, frameSize) {
+  const frame = new Array(frameSize).fill(-1);
+  const lruTime = new Array(frameSize).fill(0);
+  const matrix = Array.from({length: frameSize}, () => []);
+  const steps = [], miss = [];
+  let counter = 0, faults = 0, hits = 0;
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    counter++;
+    let idx = frame.indexOf(page);
+    let isFault = idx === -1;
+    let evicted = null;
+
+    if (!isFault) {
+      lruTime[idx] = counter;
+      hits++;
+      miss.push(' ');
+    } else {
+      let lruIdx = lruTime.indexOf(Math.min(...lruTime));
+      evicted = frame[lruIdx] !== -1 ? frame[lruIdx] : null;
+      frame[lruIdx] = page;
+      lruTime[lruIdx] = counter;
+      faults++;
+      miss.push('*');
+    }
+
+    for (let f = 0; f < frameSize; f++) matrix[f].push(frame[f]);
+    steps.push({ page, isFault, evicted, snap: [...frame], hits, faults });
+  }
+  return { steps, matrix, miss };
+}
+
+function runOptimal(pages, frameSize) {
+  const frame = new Array(frameSize).fill(-1);
+  const matrix = Array.from({length: frameSize}, () => []);
+  const steps = [], miss = [];
+  let faults = 0, hits = 0;
+
+  function predict(from) {
+    let farthest = from, pos = -1;
+    for (let i = 0; i < frameSize; i++) {
+      let j = pages.indexOf(frame[i], from);
+      if (j === -1) return i;
+      if (j > farthest) { farthest = j; pos = i; }
+    }
+    return pos === -1 ? 0 : pos;
+  }
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    let isFault = !frame.includes(page);
+    let evicted = null;
+
+    if (isFault) {
+      let pos = frame.indexOf(-1);
+      if (pos === -1) pos = predict(i + 1);
+      evicted = frame[pos] !== -1 ? frame[pos] : null;
+      frame[pos] = page;
+      faults++;
+      miss.push('*');
+    } else {
+      hits++;
+      miss.push(' ');
+    }
+
+    for (let f = 0; f < frameSize; f++) matrix[f].push(frame[f]);
+    steps.push({ page, isFault, evicted, snap: [...frame], hits, faults });
+  }
+  return { steps, matrix, miss };
+}
+
+function runAlgo(algo, pages, frameSize) {
+  if (algo === 'FIFO') return runFIFO(pages, frameSize);
+  if (algo === 'LRU')  return runLRU(pages, frameSize);
+  return runOptimal(pages, frameSize);
+}
+
+// ─── RENDER MATRIX ───────────────────────────────────────
+function buildMatrix(matrix, miss, pages, frameSize, upTo, highlightCol, algoName) {
+  const n = pages.length;
+  const display = upTo === undefined ? n : upTo + 1;
+
+  let html = `<table class="matrix-table">`;
+
+  // Header row: page numbers
+  html += `<tr><td class="frame-label"></td>`;
+  for (let j = 0; j < n; j++) {
+    const isCur = (j === highlightCol);
+    html += `<th style="font-size:11px;color:${isCur ? 'var(--yellow)' : 'var(--text2)'};padding-bottom:6px;width:42px">${j < display ? pages[j] : ''}</th>`;
+  }
+  html += `</tr>`;
+
+  // Frame rows (top = highest frame)
+  for (let f = frameSize - 1; f >= 0; f--) {
+    html += `<tr><td class="frame-label">F${f+1}</td>`;
+    for (let j = 0; j < n; j++) {
+      if (j >= display) {
+        html += `<td class="matrix-cell empty-cell">·</td>`;
+        continue;
+      }
+      const val = matrix[f][j];
+      const isCur = (j === highlightCol);
+      const isFault = miss[j] === '*';
+      const changed = j > 0 && matrix[f][j] !== matrix[f][j-1];
+
+      let cls = 'matrix-cell';
+      if (val === -1) cls += ' empty-cell';
+      else if (isCur && isFault) cls += ' fault-cell';
+      else if (isCur && !isFault) cls += ' hit-cell';
+      else if (changed && val !== -1) cls += ' changed';
+
+      if (isCur) cls += ' current-col';
+
+      html += `<td class="${cls}">${val === -1 ? '·' : val}</td>`;
+    }
+    html += `</tr>`;
+  }
+
+  // Marker row
+  html += `<tr class="marker-row"><td class="frame-label"></td>`;
+  for (let j = 0; j < n; j++) {
+    if (j >= display) { html += `<td></td>`; continue; }
+    const isFault = miss[j] === '*';
+    html += `<td class="${isFault ? '' : 'hit-marker'}">${j < display ? (isFault ? '✕' : '') : ''}</td>`;
+  }
+  html += `</tr></table>`;
+
+  return html;
+}
+
+// ─── RENDER REF STRING ───────────────────────────────────
+function renderRefString(pages, currentStep, miss) {
+  let html = '';
+  for (let i = 0; i < pages.length; i++) {
+    let cls = 'ref-page';
+    if (i === currentStep) cls += ' current';
+    else if (i < currentStep) cls += miss[i] === '*' ? ' done-fault' : ' done-hit';
+
+    html += `<div class="ref-cell">
+      <div class="${cls}">${pages[i]}</div>
+      <div class="ref-marker">${i < currentStep && miss[i] === '*' ? '✕' : (i === currentStep && miss[i] === '*' ? '✕' : '')}</div>
+    </div>`;
+  }
+  document.getElementById('refDisplay').innerHTML = html;
+}
+
+// ─── UPDATE STATS ─────────────────────────────────────────
+function updateStats(step) {
+  if (step < 0) {
+    ['steps','faults','hits','rate'].forEach(k => document.getElementById('sv-'+k).textContent = '—');
+    return;
+  }
+  const s = state.simSteps[step];
+  const total = step + 1;
+  document.getElementById('sv-steps').textContent = `${step+1}/${state.pages.length}`;
+  document.getElementById('sv-faults').textContent = s.faults;
+  document.getElementById('sv-hits').textContent = s.hits;
+  document.getElementById('sv-rate').textContent = ((s.hits / total) * 100).toFixed(1) + '%';
+
+  const pct = (s.hits / total * 100).toFixed(1);
+  document.getElementById('progressFill').style.width = `${((step+1)/state.pages.length)*100}%`;
+}
+
+// ─── UPDATE STEP BANNER ───────────────────────────────────
+function updateBanner(step) {
+  if (step < 0) {
+    document.getElementById('stepBanner').innerHTML = `<div class="empty-state" style="padding:0;flex-direction:row;gap:12px;width:100%"><div class="empty-text">CONFIGURE AND RUN A SIMULATION TO BEGIN</div></div>`;
+    return;
+  }
+  const s = state.simSteps[step];
+  const total = step + 1;
+  const hitRate = (s.hits / total * 100).toFixed(1);
+
+  document.getElementById('stepBanner').innerHTML = `
+    <div class="step-num">STEP ${step+1} / ${state.pages.length}</div>
+    <div class="step-event">
+      Page <span class="page-num">${s.page}</span>
+      <span class="${s.isFault ? 'fault-tag' : 'hit-tag'}">${s.isFault ? '✕ FAULT' : '✓ HIT'}</span>
+      ${s.evicted !== null ? `<span class="evict-info">→ evicted page ${s.evicted}</span>` : ''}
+    </div>
+    <div class="hitbar-wrap">
+      <div class="hitbar-track"><div class="hitbar-fill" style="width:${hitRate}%"></div></div>
+      <div class="hitbar-pct">${hitRate}%</div>
+    </div>
+  `;
+}
+
+// ─── UPDATE LOG ───────────────────────────────────────────
+function updateLog(step) {
+  if (step < 0) {
+    document.getElementById('logBody').innerHTML = `<div class="empty-text" style="align-self:center;padding:20px 0">—</div>`;
+    return;
+  }
+  let html = '';
+  for (let i = 0; i <= step; i++) {
+    const s = state.simSteps[i];
+    if (s.isFault) {
+      html += `<div class="log-entry visible">
+        <span class="log-step">STEP ${i+1}</span>
+        <span class="log-type-fault">FAULT</span>
+        <span class="log-msg">Page ${s.page} loaded${s.evicted !== null ? ` → evicted page ${s.evicted}` : ' into empty frame'}</span>
+      </div>`;
+    } else {
+      html += `<div class="log-entry visible">
+        <span class="log-step">STEP ${i+1}</span>
+        <span class="log-type-hit">HIT</span>
+        <span class="log-msg">Page ${s.page} already in memory</span>
+      </div>`;
+    }
+  }
+  const lb = document.getElementById('logBody');
+  lb.innerHTML = html;
+  lb.scrollTop = lb.scrollHeight;
+}
+
+// ─── RENDER STEP ─────────────────────────────────────────
+function renderStep(step) {
+  state.currentStep = step;
+  const { simSteps, matrix, miss, pages, frames } = state;
+
+  renderRefString(pages, step, miss);
+  updateStats(step);
+  updateBanner(step);
+  updateLog(step);
+
+  document.getElementById('matrixBody').innerHTML =
+    buildMatrix(matrix, miss, pages, frames, step, step, state.algo);
+
+  document.getElementById('algoTag').textContent = state.algo;
+
+  // Step mode nav
+  if (state.stepMode) {
+    document.getElementById('prevBtn').disabled = step <= 0;
+    document.getElementById('nextBtn').disabled = step >= pages.length - 1;
+  }
+
+  ['sc-steps','sc-faults','sc-hits','sc-rate'].forEach(id => {
+    document.getElementById(id).classList.add('active');
+  });
+}
+
+// ─── AUTO PLAY ────────────────────────────────────────────
+function autoPlay(from) {
+  if (state.timer) clearInterval(state.timer);
+  let step = from;
+  state.timer = setInterval(() => {
+    if (step >= state.pages.length) {
+      clearInterval(state.timer);
+      state.running = false;
+      return;
+    }
+    renderStep(step);
+    step++;
+  }, state.speed);
+}
+
+// ─── STEP CONTROLS ────────────────────────────────────────
+function stepFwd() {
+  if (state.currentStep < state.pages.length - 1)
+    renderStep(state.currentStep + 1);
+}
+
+function stepBack() {
+  if (state.currentStep > 0)
+    renderStep(state.currentStep - 1);
+}
+
+// ─── RUN SIMULATION ──────────────────────────────────────
+function runSimulation() {
+  const pages = parsePages();
+  if (!pages.length) { alert('Enter a valid page reference string.'); return; }
+  const frameSize = parseInt(document.getElementById('frameRange').value);
+
+  if (state.timer) clearInterval(state.timer);
+
+  state.pages = pages;
+  state.frames = frameSize;
+
+  // Show/hide views
+  document.getElementById('simView').style.display = 'flex';
+  document.getElementById('compareView').style.display = 'none';
+  document.getElementById('sweepView').style.display = 'none';
+
+  if (state.algo === 'COMPARE') {
+    runCompare(pages, frameSize);
+    return;
+  }
+
+  const result = runAlgo(state.algo, pages, frameSize);
+  state.simSteps = result.steps;
+  state.matrix = result.matrix;
+  state.miss = result.miss;
+  state.currentStep = -1;
+
+  // Reset display
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('logBody').innerHTML = `<div class="empty-text" style="align-self:center;padding:20px 0">—</div>`;
+
+  if (state.stepMode) {
+    renderStep(0);
+  } else {
+    autoPlay(0);
+  }
+}
+
+// ─── COMPARE ALL ─────────────────────────────────────────
+function runCompare(pages, frameSize) {
+  document.getElementById('simView').style.display = 'none';
+  document.getElementById('compareView').style.display = 'flex';
+  document.getElementById('sweepView').style.display = 'none';
+
+  const algos = ['FIFO', 'LRU', 'OPT'];
+  const results = algos.map(a => ({
+    algo: a,
+    ...runAlgo(a, pages, frameSize)
+  }));
+
+  const finalFaults = results.map(r => r.steps[r.steps.length-1].faults);
+  const finalHits   = results.map(r => r.steps[r.steps.length-1].hits);
+  const maxFaults = Math.max(...finalFaults);
+  const minFaults = Math.min(...finalFaults);
+
+  let tbody = '';
+  results.forEach((r, i) => {
+    const f = finalFaults[i];
+    const h = finalHits[i];
+    const total = pages.length;
+    const fRate = (f/total).toFixed(2);
+    const hRate = (h/total).toFixed(2);
+    const pct = maxFaults === 0 ? 0 : (f / maxFaults * 100);
+    const isBest = f === minFaults;
+    const fillCls = i === 0 ? '' : i === 1 ? 'mid' : 'worst';
+
+    tbody += `<tr${isBest ? ' class="best-row"' : ''}>
+      <td class="compare-algo">${r.algo}${isBest ? ' ★' : ''}</td>
+      <td style="color:var(--fault)">${f}</td>
+      <td style="color:var(--hit)">${h}</td>
+      <td style="color:var(--yellow)">${fRate}</td>
+      <td style="color:var(--green)">${hRate}</td>
+      <td class="bar-cell">
+        <div class="inline-bar">
+          <div class="inline-bar-track">
+            <div class="inline-bar-fill ${isBest?'':'worst'}" style="width:${pct}%"></div>
+          </div>
+          <span style="font-size:11px;color:var(--text2)">${f}</span>
+        </div>
+      </td>
+    </tr>`;
+  });
+  document.getElementById('compareTbody').innerHTML = tbody;
+
+  // Build per-algo matrices
+  let mhtml = '';
+  results.forEach((r, i) => {
+    const f = finalFaults[i];
+    const h = finalHits[i];
+    mhtml += `
+      <div class="matrix-panel">
+        <div class="matrix-header">
+          <div class="matrix-title">${r.algo} — Faults: ${f} | Hits: ${h}</div>
+        </div>
+        <div class="matrix-scroll">
+          ${buildMatrix(r.matrix, r.miss, pages, frameSize, pages.length-1, -1, r.algo)}
+        </div>
+      </div>`;
+  });
+  document.getElementById('compareMatrices').innerHTML = mhtml;
+}
+
+// ─── FRAME SWEEP ─────────────────────────────────────────
+function runSweep(algo) {
+  const pages = parsePages();
+  if (!pages.length) { alert('Enter a valid page reference string.'); return; }
+
+  document.getElementById('sweepView').style.display = 'block';
+  document.getElementById('sweepTitle').textContent = `Frame Sweep — ${algo} — Belady's Anomaly Detector`;
+
+  const rows = [];
+  for (let fs = 1; fs <= 10; fs++) {
+    const r = runAlgo(algo, pages, fs);
+    rows.push({ fs, faults: r.steps[r.steps.length-1].faults });
+  }
+
+  const maxF = Math.max(...rows.map(r => r.faults));
+  let html = '';
+
+  rows.forEach((row, i) => {
+    const prev = i > 0 ? rows[i-1].faults : -1;
+    const anomaly = algo === 'FIFO' && prev !== -1 && row.faults > prev;
+    const pct = maxF === 0 ? 0 : (row.faults / maxF * 100);
+
+    html += `<div class="sweep-row">
+      <div class="sweep-label">FRAMES ${row.fs}</div>
+      <div class="sweep-bar-track">
+        <div class="sweep-bar-fill ${anomaly ? 'anomaly' : ''}" style="width:${pct}%">
+          ${pct > 15 ? row.faults : ''}
+        </div>
+      </div>
+      <div class="sweep-count">${row.faults}</div>
+      ${anomaly ? '<div class="anomaly-tag">⚠ BELADY</div>' : '<div style="width:80px"></div>'}
+    </div>`;
+  });
+
+  document.getElementById('sweepGrid').innerHTML = html;
+}
+
+// ─── RESET ───────────────────────────────────────────────
+function resetAll(soft) {
+  if (state.timer) clearInterval(state.timer);
+  state.simSteps = [];
+  state.matrix = [];
+  state.miss = [];
+  state.currentStep = -1;
+  state.running = false;
+
+  if (!soft) {
+    document.getElementById('pageInput').value = '7 0 1 2 0 3 0 4 2 3 0 3';
+    document.getElementById('frameRange').value = 3;
+    document.getElementById('frameVal').textContent = 3;
+  }
+
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('refDisplay').innerHTML = `<div class="empty-text" style="padding:8px 0">—</div>`;
+  document.getElementById('matrixBody').innerHTML = `<div class="empty-state"><div class="empty-icon">▦</div><div class="empty-text">MATRIX WILL APPEAR HERE</div></div>`;
+  document.getElementById('logBody').innerHTML = `<div class="empty-text" style="align-self:center;padding:20px 0">—</div>`;
+  document.getElementById('algoTag').textContent = '';
+  ['steps','faults','hits','rate'].forEach(k => document.getElementById('sv-'+k).textContent = '—');
+  document.getElementById('stepBanner').innerHTML = `<div class="empty-state" style="padding:0;flex-direction:row;gap:12px;width:100%"><div class="empty-text">CONFIGURE AND RUN A SIMULATION TO BEGIN</div></div>`;
+
+  document.getElementById('simView').style.display = 'flex';
+  document.getElementById('compareView').style.display = 'none';
+  document.getElementById('sweepView').style.display = 'none';
+}
+
+// ─── EXPORT ──────────────────────────────────────────────
+function saveResults() {
+  if (!state.simSteps.length && state.algo !== 'COMPARE') {
+    alert('Run a simulation first.'); return;
+  }
+
+  const pages = parsePages();
+  const frameSize = parseInt(document.getElementById('frameRange').value);
+  const ts = new Date().toLocaleString();
+
+  let txt = `PAGE REPLACEMENT SIMULATION RESULTS\n`;
+  txt += `=====================================\n`;
+  txt += `Date       : ${ts}\n`;
+  txt += `Algorithm  : ${state.algo}\n`;
+  txt += `Frame Size : ${frameSize}\n`;
+  txt += `Pages      : ${pages.join(' ')}\n\n`;
+
+  if (state.algo !== 'COMPARE') {
+    const last = state.simSteps[state.simSteps.length - 1];
+    txt += `Page Faults: ${last.faults}\n`;
+    txt += `Hits       : ${last.hits}\n`;
+    txt += `Fault Rate : ${(last.faults/pages.length).toFixed(2)}\n`;
+    txt += `Hit Rate   : ${(last.hits/pages.length).toFixed(2)}\n\n`;
+    txt += `Eviction Log:\n`;
+    state.simSteps.forEach((s, i) => {
+      if (s.isFault)
+        txt += `  Step ${i+1}: Page ${s.page} → ${s.evicted !== null ? 'evicted page '+s.evicted : 'empty frame'}\n`;
+    });
+  } else {
+    ['FIFO','LRU','OPT'].forEach(a => {
+      const r = runAlgo(a, pages, frameSize);
+      const last = r.steps[r.steps.length - 1];
+      txt += `${a}: Faults=${last.faults}  Hits=${last.hits}  HitRate=${(last.hits/pages.length).toFixed(2)}\n`;
+    });
+  }
+
+  const blob = new Blob([txt], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'simulation_results.txt';
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ─── INIT ─────────────────────────────────────────────────
+document.getElementById('sweepSection').style.display = 'block';
+</script>
+</body>
+</html>
